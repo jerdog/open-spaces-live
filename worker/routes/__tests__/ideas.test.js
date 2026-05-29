@@ -384,6 +384,44 @@ describe('POST /merge', () => {
 		expect(merged.merged_into_id).toBe('idea_1');
 	});
 
+	it('rolls the merged idea\'s votes into the primary vote_count', async () => {
+		const db = fakeDb({
+			ideas: [
+				{ id: 'idea_1', title: 'Primary', status: 'open', vote_count: 1, description: '', submitter_id: 'att_1', slot_id: null, room_id: null, merged_into_id: null, created_at: 1, updated_at: 1 },
+				{ id: 'idea_2', title: 'Merged', status: 'open', vote_count: 2, description: '', submitter_id: 'att_2', slot_id: null, room_id: null, merged_into_id: null, created_at: 2, updated_at: 2 },
+			],
+			votes: [
+				{ idea_id: 'idea_1', attendee_id: 'att_a', created_at: 1 },
+				{ idea_id: 'idea_2', attendee_id: 'att_b', created_at: 1 },
+				{ idea_id: 'idea_2', attendee_id: 'att_c', created_at: 1 },
+			],
+		});
+		const app = buildApp({ db, role: 'facilitator' });
+		const res = await req(app, 'POST', '/merge', { body: { primary_id: 'idea_1', merge_ids: ['idea_2'] } });
+		const json = await res.json();
+		// 3 distinct voters total (att_a + att_b + att_c).
+		expect(json.primary.vote_count).toBe(3);
+		expect(db.ideas.find(i => i.id === 'idea_1').vote_count).toBe(3);
+	});
+
+	it('does not double-count a voter who voted on both ideas', async () => {
+		const db = fakeDb({
+			ideas: [
+				{ id: 'idea_1', title: 'Primary', status: 'open', vote_count: 1, description: '', submitter_id: 'att_1', slot_id: null, room_id: null, merged_into_id: null, created_at: 1, updated_at: 1 },
+				{ id: 'idea_2', title: 'Merged', status: 'open', vote_count: 1, description: '', submitter_id: 'att_2', slot_id: null, room_id: null, merged_into_id: null, created_at: 2, updated_at: 2 },
+			],
+			votes: [
+				{ idea_id: 'idea_1', attendee_id: 'att_shared', created_at: 1 },
+				{ idea_id: 'idea_2', attendee_id: 'att_shared', created_at: 1 },
+			],
+		});
+		const app = buildApp({ db, role: 'facilitator' });
+		const res = await req(app, 'POST', '/merge', { body: { primary_id: 'idea_1', merge_ids: ['idea_2'] } });
+		const json = await res.json();
+		// Same person on both -> still counts once.
+		expect(json.primary.vote_count).toBe(1);
+	});
+
 	it('surfaces merged-in idea content on the primary', async () => {
 		const db = fakeDb({
 			ideas: [
